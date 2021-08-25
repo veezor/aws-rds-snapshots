@@ -1,0 +1,9 @@
+{
+  "name": "copy-or-take-and-restore-snapshots",
+  "description": "",
+  "version": "0.1.0",
+  "devDependencies": {
+    "serverless-plugin-select": "^2.0.0-rc.1",
+    "serverless-python-requirements": "^5.1.1"
+  }
+}

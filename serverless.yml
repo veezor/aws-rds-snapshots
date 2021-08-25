@@ -1,0 +1,144 @@
+service: copy-or-take-snapshots
+frameworkVersion: '2'
+
+provider:
+  name: aws
+  runtime: python3.8
+  lambdaHashingVersion: 20201221
+
+# you can overwrite defaults here
+  region: us-east-1
+
+# you can add statements to the Lambda function's IAM Role here
+resources:
+  Resources:
+    roleForProd:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: RoleForProd
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: myPolicyName
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "rds:DescribeDBInstances"
+                    - "rds:DescribeDBClusters"
+                    - "rds:DescribeDBClusterSnapshots"
+                    - "rds:DescribeDBSnapshots"
+                    - "rds:AddTagsToResource"
+                    - "rds:CreateDBClusterSnapshot"
+                    - "rds:CreateDBSnapshot"
+                    - "rds:CopyDBClusterSnapshot"
+                    - "rds:CopyDBSnapshot"
+                    - "rds:ModifyDBClusterSnapshotAttribute"
+                    - "rds:ModifyDBSnapshotAttribute"
+                    - "rds:DeleteDBClusterSnapshot"
+                    - "rds:DeleteDBSnapshot"
+                    - "kms:DescribeKey"
+                    - "kms:CreateGrant"
+                  Resource: [
+                    "arn:aws:rds:${self:provider.stage}:*:db:*",
+                    "arn:aws:rds:${self:provider.stage}:*:cluster:*",
+                    "arn:aws:rds:${self:provider.stage}:*:cluster-snapshot:*",
+                    "arn:aws:rds:${self:provider.stage}:*:snapshot:*",
+                    "arn:aws:kms:${self:provider.stage}:*:key/*"
+                    ]
+    roleForDev:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: RoleForDev
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: myPolicyName
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
+                  Action:
+                    - "rds:DescribeDBInstances"
+                    - "rds:DescribeDBClusters"
+                    - "rds:DescribeDBClusterSnapshots"
+                    - "rds:DescribeDBSnapshots"
+                    - "rds:AddTagsToResource"
+                    - "rds:CreateDBInstance"
+                    - "rds:CopyDBClusterSnapshot"
+                    - "rds:CopyDBSnapshot"
+                    - "rds:ModifyDBCluster"
+                    - "rds:ModifyDBInstance"
+                    - "rds:ModifyDBClusterSnapshotAttribute"
+                    - "rds:ModifyDBSnapshotAttribute"
+                    - "rds:DeleteDBClusterSnapshot"
+                    - "rds:DeleteDBSnapshot"
+                    - "rds:RestoreDBClusterFromSnapshot"
+                    - "rds:RestoreDBInstanceFromDBSnapshot"
+                    - "rds:DeleteDBCluster"
+                    - "rds:DeleteDBInstance"
+                    - "kms:DescribeKey"
+                    - "kms:CreateGrant"
+                  Resource: [
+                    "arn:aws:rds:${self:provider.stage}:*:db:*",
+                    "arn:aws:rds:${self:provider.stage}:*:cluster:*",
+                    "arn:aws:rds:${self:provider.stage}:*:cluster-snapshot:*",
+                    "arn:aws:rds:${self:provider.stage}:*:snapshot:*",
+                    "arn:aws:rds:${self:provider.stage}:*:subgrp:*",
+                    "arn:aws:kms:${self:provider.stage}:*:key/*"
+                    ]
+
+  environment:
+    AWS_TARGET_KMS_KEY: ${self:custom.awsTargetKmsKey.${self:provider.stage}}
+    AWS_TARGET_ACCOUNT: ${self:custom.awsTargetAccount.${self:provider.stage}}
+    LOG_LEVEL: info
+    
+functions:
+  lambda_handler_prod:
+    stages:
+      - prod
+    role: roleForProd
+    handler: copy_or_take_snapshots.lambda_handler
+    timeout: 60
+    events:
+      - schedule: cron(0/5 4-7 ? * * *)
+
+# generate lambda for Developmente account, (stage == dev)
+lambda_handler_dev:
+    stages:
+      - dev
+    role: roleForDev
+    handler: restore_snapshots.lambda_handler
+    timeout: 60
+    events:
+      - schedule: cron(0/5 4-7 ? * * *)
+
+custom:
+  pythonRequirements:
+    useDownloadCache: false
+    slim: true
+  # Replace these values with the correctly KMS key
+  awsTargetKmsKey:
+    dev: arn:aws:kms:us-east-1:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+    prod: arn:aws:kms:us-east-1:22222222222:key/ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj
+  # Replace these values with correctly AWS account numbers
+  awsTargetAccount:
+    dev: 222222222222
+    prod: 111111111111
+
+plugins:
+  - serverless-python-requirements
+  - serverless-plugin-select

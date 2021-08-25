@@ -1,0 +1,7 @@
+._*
+*.zip
+__pycache__/
+*.py[cod]
+node_modules/
+.serverless/
+.vscode
