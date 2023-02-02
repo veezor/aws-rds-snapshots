@@ -1,4 +1,4 @@
-service: copy-or-take-snapshots
+service: aws-rds-snapshots
 frameworkVersion: '2'
 
 provider:
@@ -12,10 +12,10 @@ provider:
 # you can add statements to the Lambda function's IAM Role here
 resources:
   Resources:
-    roleForProd:
+    sourceRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: RoleForProd
+        RoleName: AwsRdsSnapshotsSourceRole
         AssumeRolePolicyDocument:
           Version: '2012-10-17'
           Statement:
@@ -25,7 +25,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: myPolicyName
+          - PolicyName: AwsRdsSnapshotsSourcePolicy
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
@@ -47,16 +47,16 @@ resources:
                     - "kms:DescribeKey"
                     - "kms:CreateGrant"
                   Resource: [
-                    "arn:aws:rds:${self:provider.stage}:*:db:*",
-                    "arn:aws:rds:${self:provider.stage}:*:cluster:*",
-                    "arn:aws:rds:${self:provider.stage}:*:cluster-snapshot:*",
-                    "arn:aws:rds:${self:provider.stage}:*:snapshot:*",
-                    "arn:aws:kms:${self:provider.stage}:*:key/*"
+                    "arn:aws:rds:${self:custom.awsTargetAccount.source}:*:db:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.source}:*:cluster:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.source}:*:cluster-snapshot:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.source}:*:snapshot:*",
+                    "arn:aws:kms:${self:custom.awsTargetAccount.source}:*:key/*"
                     ]
-    roleForDev:
+    targetRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: RoleForDev
+        RoleName: AwsRdsSnapshotsTargetRole
         AssumeRolePolicyDocument:
           Version: '2012-10-17'
           Statement:
@@ -66,7 +66,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: myPolicyName
+          - PolicyName: AwsRdsSnapshotsTargetPolicy
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
@@ -93,34 +93,35 @@ resources:
                     - "kms:DescribeKey"
                     - "kms:CreateGrant"
                   Resource: [
-                    "arn:aws:rds:${self:provider.stage}:*:db:*",
-                    "arn:aws:rds:${self:provider.stage}:*:cluster:*",
-                    "arn:aws:rds:${self:provider.stage}:*:cluster-snapshot:*",
-                    "arn:aws:rds:${self:provider.stage}:*:snapshot:*",
-                    "arn:aws:rds:${self:provider.stage}:*:subgrp:*",
-                    "arn:aws:kms:${self:provider.stage}:*:key/*"
+                    "arn:aws:rds:${self:custom.awsTargetAccount.target}:*:db:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.target}:*:cluster:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.target}:*:cluster-snapshot:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.target}:*:snapshot:*",
+                    "arn:aws:rds:${self:custom.awsTargetAccount.target}:*:subgrp:*",
+                    "arn:aws:kms:${self:custom.awsTargetAccount.target}:*:key/*"
                     ]
 
   environment:
-    AWS_TARGET_KMS_KEY: ${self:custom.awsTargetKmsKey.${self:provider.stage}}
-    AWS_TARGET_ACCOUNT: ${self:custom.awsTargetAccount.${self:provider.stage}}
+    AWS_TARGET_KMS_KEY: ${self:custom.awsTargetKmsKey}
+    AWS_SOURCE_ACCOUNT: ${self:custom.awsTargetAccount.source}
+    AWS_TARGET_ACCOUNT: ${self:custom.awsTargetAccount.target}
     LOG_LEVEL: info
     
 functions:
-  lambda_handler_prod:
+  lambda_handler_source:
     stages:
-      - prod
-    role: roleForProd
+      - source
+    role: sourceRole
     handler: copy_or_take_snapshots.lambda_handler
     timeout: 60
     events:
       - schedule: cron(0/5 4-7 ? * * *)
 
-# generate lambda for Developmente account, (stage == dev)
-lambda_handler_dev:
+# generate lambda for target account, (stage == target)
+lambda_handler_target:
     stages:
-      - dev
-    role: roleForDev
+      - target
+    role: targetRole
     handler: restore_snapshots.lambda_handler
     timeout: 60
     events:
@@ -130,14 +131,12 @@ custom:
   pythonRequirements:
     useDownloadCache: false
     slim: true
-  # Replace these values with the correctly KMS key
-  awsTargetKmsKey:
-    dev: arn:aws:kms:us-east-1:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
-    prod: arn:aws:kms:us-east-1:22222222222:key/ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj
-  # Replace these values with correctly AWS account numbers
+  # Replace value with the target account KMS key
+  awsTargetKmsKey: arn:aws:kms:us-east-1:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+  # Replace these values with source and target AWS account numbers
   awsTargetAccount:
-    dev: 222222222222
-    prod: 111111111111
+    source: 222222222222
+    target: 111111111111
 
 plugins:
   - serverless-python-requirements
