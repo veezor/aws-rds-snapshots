@@ -15,6 +15,9 @@ provider:
       AWS_SOURCE_ACCOUNT: ${self:custom.awsTargetAccount.source}
       AWS_TARGET_ACCOUNT: ${self:custom.awsTargetAccount.target}
       LOG_LEVEL: info
+      # uncomment and type the RDS identifier to debug
+      #DEBUG_DATABASE: rds_id
+      TZ: ${self:custom.awsTimeZone}
 
 # you can add statements to the Lambda function's IAM Role here
 resources:
@@ -51,15 +54,29 @@ resources:
                     - "rds:ModifyDBSnapshotAttribute"
                     - "rds:DeleteDBClusterSnapshot"
                     - "rds:DeleteDBSnapshot"
-                    - "kms:DescribeKey"
                     - "kms:CreateGrant"
+                    - "kms:Encrypt"
+                    - "kms:Decrypt"
+                    - "kms:ReEncrypt*"
+                    - "kms:GenerateDataKey*"
+                    - "kms:DescribeKey"
                   Resource: [
                     "arn:aws:rds:*:${self:custom.awsTargetAccount.source}:db:*",
                     "arn:aws:rds:*:${self:custom.awsTargetAccount.source}:cluster:*",
                     "arn:aws:rds:*:*:cluster-snapshot:*",
                     "arn:aws:rds:*:*:snapshot:*",
-                    "arn:aws:kms:*:${self:custom.awsTargetAccount.source}:key/*"
+                     "arn:aws:kms:*:*:key/*"
                     ]
+        - PolicyName: AwsRdsSnapshotsSourcePolicyLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: '*'
     targetRole:
       Type: AWS::IAM::Role
       Properties:
@@ -74,39 +91,54 @@ resources:
               Action: sts:AssumeRole
         Policies:
           - PolicyName: AwsRdsSnapshotsTargetPolicy
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
+                    Action:
+                      - "rds:DescribeDBInstances"
+                      - "rds:DescribeDBClusters"
+                      - "rds:DescribeDBClusterSnapshots"
+                      - "rds:DescribeDBSnapshots"
+                      - "rds:AddTagsToResource"
+                      - "rds:CreateDBInstance"
+                      - "rds:CopyDBClusterSnapshot"
+                      - "rds:CopyDBSnapshot"
+                      - "rds:ModifyDBCluster"
+                      - "rds:ModifyDBInstance"
+                      - "rds:ModifyDBClusterSnapshotAttribute"
+                      - "rds:ModifyDBSnapshotAttribute"
+                      - "rds:DeleteDBClusterSnapshot"
+                      - "rds:DeleteDBSnapshot"
+                      - "rds:RestoreDBClusterFromSnapshot"
+                      - "rds:RestoreDBInstanceFromDBSnapshot"
+                      - "rds:DeleteDBCluster"
+                      - "rds:DeleteDBInstance"
+                      - "kms:DescribeKey"
+                      - "kms:CreateGrant"
+                      - "kms:Encrypt"
+                      - "kms:Decrypt"
+                      - "kms:ReEncrypt*"
+                      - "kms:GenerateDataKey*"
+                      - "kms:DescribeKey"
+                    Resource: [
+                      "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:db:*",
+                      "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:cluster:*",
+                      "arn:aws:rds:*:*:cluster-snapshot:*",
+                      "arn:aws:rds:*:*:snapshot:*",
+                      "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:subgrp:*",
+                      "arn:aws:kms:*:*:key/*"
+                      ]
+          - PolicyName: AwsRdsSnapshotsTargetPolicyLogs
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
                 - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
                   Action:
-                    - "rds:DescribeDBInstances"
-                    - "rds:DescribeDBClusters"
-                    - "rds:DescribeDBClusterSnapshots"
-                    - "rds:DescribeDBSnapshots"
-                    - "rds:AddTagsToResource"
-                    - "rds:CreateDBInstance"
-                    - "rds:CopyDBClusterSnapshot"
-                    - "rds:CopyDBSnapshot"
-                    - "rds:ModifyDBCluster"
-                    - "rds:ModifyDBInstance"
-                    - "rds:ModifyDBClusterSnapshotAttribute"
-                    - "rds:ModifyDBSnapshotAttribute"
-                    - "rds:DeleteDBClusterSnapshot"
-                    - "rds:DeleteDBSnapshot"
-                    - "rds:RestoreDBClusterFromSnapshot"
-                    - "rds:RestoreDBInstanceFromDBSnapshot"
-                    - "rds:DeleteDBCluster"
-                    - "rds:DeleteDBInstance"
-                    - "kms:DescribeKey"
-                    - "kms:CreateGrant"
-                  Resource: [
-                    "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:db:*",
-                    "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:cluster:*",
-                    "arn:aws:rds:*:*:cluster-snapshot:*",
-                    "arn:aws:rds:*:*:snapshot:*",
-                    "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:subgrp:*",
-                    "arn:aws:kms:*:${self:custom.awsTargetAccount.target}:key/*"
-                    ]
+                    - "logs:CreateLogGroup"
+                    - "logs:CreateLogStream"
+                    - "logs:PutLogEvents"
+                  Resource: '*'
 
 # generate lambda for source account, (stage == source) 
 functions:
@@ -117,7 +149,7 @@ functions:
     handler: copy_or_take_snapshots.lambda_handler
     timeout: 60
     events:
-      - schedule: cron(0/5 4-7 ? * * *)
+      - schedule: cron(0/5 * ? * * *)
 
 # generate lambda for target account, (stage == target)
 lambda_handler_target:
@@ -127,7 +159,7 @@ lambda_handler_target:
     handler: restore_snapshots.lambda_handler
     timeout: 60
     events:
-      - schedule: cron(0/5 4-7 ? * * *)
+      - schedule: cron(0/5 * ? * * *)
 
 custom:
   pythonRequirements:
@@ -139,12 +171,15 @@ custom:
   sourceAwsRegion: us-east-1
   # Replace value with the target region
   targetAwsRegion: us-west-2
-  # Replace value with the target account KMS key
-  awsTargetKmsKey: arn:aws:kms:us-east-1:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+  # Replace value with the target account KMS key name,  key ID like mrk-85733a57f8ca4964ac1c3c001b190b3f 
+  # (it needs to be accessible from target account and be replicate in target region)
+  awsTargetKmsKey: mrk-85733a57f8ca4964ac1c3c001b190b3f
   # Replace these values with source and target AWS account numbers
   awsTargetAccount:
     source: 222222222222
     target: 111111111111
+  # Replace these values with UTC Time Zone
+  awsTimeZone: Etc/GMT
 
 plugins:
   - serverless-python-requirements
