@@ -19,6 +19,12 @@ TAGS_COPIED = [
         'Value': 'copied'
     }
 ]
+TAGS_COPIED_KMS = [
+    {
+        'Key': 'DBSSR',
+        'Value': 'copied_kms'
+    }
+]
 TAGS_SHARED = [
     {
         'Key': 'DBSSR',
