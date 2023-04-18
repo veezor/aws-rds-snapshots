@@ -114,7 +114,6 @@ resources:
                       - "rds:RestoreDBInstanceFromDBSnapshot"
                       - "rds:DeleteDBCluster"
                       - "rds:DeleteDBInstance"
-                      - "kms:DescribeKey"
                       - "kms:CreateGrant"
                       - "kms:Encrypt"
                       - "kms:Decrypt"
