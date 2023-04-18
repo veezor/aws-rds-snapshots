@@ -9,9 +9,9 @@ TARGET_REGION = os.getenv('TARGET_AWS_REGION', os.getenv('AWS_DEFAULT_REGION', '
 BACKUP_INTERVAL = int(os.getenv('BACKUP_INTERVAL', '24'))
 DATABASE_NAME_PATTERN = os.getenv('DATABASE_NAME_PATTERN', 'ALL').strip()
 SUPPORTED_ENGINES = [ 'aurora', 'aurora-mysql', 'aurora-postgresql', 'postgres', 'mysql' ]
-TARGET_KMS_KEY = os.getenv('AWS_TARGET_KMS_KEY', 'None').strip()
 SOURCE_ACCOUNT = os.getenv('AWS_SOURCE_ACCOUNT', '000000000000').strip()
 DEBUG_DATABASE = os.getenv('DEBUG_DATABASE', '').strip()
+TARGET_KMS_KEY = f"arn:aws:kms:{TARGET_REGION}:{SOURCE_ACCOUNT}:key/{os.getenv('AWS_TARGET_KMS_KEY', 'None').strip()}"
 
 logger = logging.getLogger()
 logger.setLevel(LOGLEVEL.upper())
@@ -223,7 +223,7 @@ def process_snapshots(snapshots, databases, client):
                 else:
                     client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
             else:
-                logger.info("Did not delete snakpthot %s as it wasn't created by DBSSR!", snapshot['name'])
+                logger.info("Did not delete snaptshot %s as it wasn't created by DBSSR!", snapshot['name'])
             continue
 
 def filter_databases(pattern, response):
@@ -243,7 +243,7 @@ def filter_databases(pattern, response):
         create_time = 'ClusterCreateTime'
     
     for database in response[databases]:
-        if find_tag(database['TagList'], 'DBSSR') and (pattern == 'ALL' or re.search(pattern, database[identifier])) and database['Engine'] in SUPPORTED_ENGINES:
+        if (pattern == 'ALL' or (pattern == 'TAG' and find_tag(database['TagList'], 'DBSSR')) or re.search(pattern, database[identifier])) and database['Engine'] in SUPPORTED_ENGINES:
             database_name = get_tag(database['TagList'], 'DBSSR')
 
             # Skip stopped databases
@@ -305,7 +305,7 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
             continue
 
         # Ignore as didn't match pattern or supported engine
-        if ((pattern != 'ALL' and not re.search(pattern, snapshot[identifier])) or snapshot['Engine'] not in SUPPORTED_ENGINES):
+        if ((pattern not in ['ALL', 'TAG'] and not re.search(pattern, snapshot[identifier])) or snapshot['Engine'] not in SUPPORTED_ENGINES):
             continue
 
         # Skip snapshots out of backup interval
