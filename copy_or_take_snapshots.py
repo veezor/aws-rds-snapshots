@@ -88,6 +88,8 @@ def process_snapshots(snapshots, databases, client, client_target):
         if snapshot['action'] == 'copy':
             logger.info("Copying snapshot %s", snapshot['name'])
             target_snapshot=snapshot['name'].split(':')[1] + '-DBSSR'
+            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
             if SOURCE_REGION == TARGET_REGION:
                 if snapshot['type'] == 'cluster':
                     client.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['name'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=SOURCE_KMS_KEY, Tags=TAGS_CREATED_BY)
@@ -99,13 +101,33 @@ def process_snapshots(snapshots, databases, client, client_target):
                 if snapshot['type'] == 'cluster':
                     client.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['name'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=SOURCE_KMS_KEY, Tags=TAGS_CREATED_BY)
                     client_target.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['arn'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)
+                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
+                    client_target.add_tags_to_resource(ResourceName=target_region_cluster_snapshot_arn, Tags=TAGS_COPIED)
                 else:
                     client.copy_db_snapshot(SourceDBSnapshotIdentifier=snapshot['name'], TargetDBSnapshotIdentifier=target_snapshot, KmsKeyId=SOURCE_KMS_KEY, Tags=TAGS_CREATED_BY)
                     client_target.copy_db_snapshot(SourceDBSnapshotIdentifier=snapshot['arn'], TargetDBSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)
-                client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
-                client_target.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
+                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
+                    client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_COPIED)
                 continue
         
+        if snapshot['action'] == 'copy_no_key':
+            logger.info("Copying snapshot %s without kms key", snapshot['name'])
+            now = datetime.now()
+            now_str = now.strftime("-%Y-%m-%d-%H-%M")
+            target_snapshot = snapshot['id'] + now_str + '-DBSSR'
+            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
+            if SOURCE_REGION != TARGET_REGION:
+                if snapshot['type'] == 'cluster':
+                    client_target.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['arn'], TargetDBClusterSnapshotIdentifier=target_snapshot, Tags=TAGS_CREATED_BY)
+                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
+                    client_target.add_tags_to_resource(ResourceName=target_region_cluster_snapshot_arn, Tags=TAGS_COPIED)
+                else:
+                    client_target.copy_db_snapshot(SourceDBSnapshotIdentifier=snapshot['arn'], TargetDBSnapshotIdentifier=target_snapshot, Tags=TAGS_CREATED_BY)
+                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
+                    client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_COPIED)
+                continue
+
         if snapshot['action'] == 'copy_kms':
             logger.info("Copying snapshot %s to change kms key", snapshot['name'])
             now = datetime.now()
@@ -122,6 +144,7 @@ def process_snapshots(snapshots, databases, client, client_target):
             logger.info("Sharing snapshot %s", snapshot['name'])
             target_snapshot=snapshot['name']
             target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
             if SOURCE_REGION == TARGET_REGION:
                 if snapshot['type'] == 'cluster':
                     client.modify_db_cluster_snapshot_attribute(DBClusterSnapshotIdentifier=snapshot['name'], AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
@@ -131,24 +154,82 @@ def process_snapshots(snapshots, databases, client, client_target):
                 continue
             else:
                 try:
-                    client_target.describe_db_snapshots(DBSnapshotIdentifier=target_snapshot)
                     if snapshot['type'] == 'cluster':
+                        client_target.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=target_snapshot)
                         client_target.modify_db_cluster_snapshot_attribute(DBClusterSnapshotIdentifier=target_snapshot, AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
+                        client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                        client_target.add_tags_to_resource(ResourceName=target_region_cluster_snapshot_arn, Tags=TAGS_SHARED)
                     else:
+                        client_target.describe_db_snapshots(DBSnapshotIdentifier=target_snapshot)
                         client_target.modify_db_snapshot_attribute(DBSnapshotIdentifier=target_snapshot, AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
-                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
-                    client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_SHARED)
+                        client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                        client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_SHARED)
                     continue
                 except ClientError as e:
-                    if e.response['Error']['Code'] == 'DBSnapshotNotFound':
-                        logger.info("Snapshot does not exist in the target account: %s", target_snapshot)
-                        if snapshot['type'] == 'cluster':
-                            client_target.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['arn'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)
-                        else:
-                            client_target.copy_db_snapshot(SourceDBSnapshotIdentifier=snapshot['arn'], TargetDBSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)    
-                        continue
+                    if e.response['Error']['Code'] == 'DBSnapshotNotFound' or e.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
+                        logger.info("Snapshot does not exist in the target region: %s", target_snapshot)
+                        try:
+                            if snapshot['type'] == 'cluster':
+                                client_target.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['arn'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)
+                            else:
+                                client_target.copy_db_snapshot(SourceDBSnapshotIdentifier=snapshot['arn'], TargetDBSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)    
+                            continue
+                        except ClientError as ein:
+                            if ein.response['Error']['Code'] == 'DBSnapshotAlreadyExistsFault' or ein.response['Error']['Code'] == 'DBClusterSnapshotAlreadyExistsFault':
+                                logger.error("Skipping share: %s (%s)", target_snapshot, ein.response['Error']['Code'])
+                                continue
+                            else:
+                                logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
+                                raise ein
                     else:
-                        logger.error("Error checking snapshot: %s", target_snapshot)
+                        logger.error("Error checking snapshot: %s (%s)", target_snapshot, e.response['Error']['Code'])
+                        raise e
+                continue
+        if snapshot['action'] == 'share_no_key':
+            logger.info("Sharing snapshot %s with out kms key", snapshot['name'])
+            target_snapshot=snapshot['name']
+            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
+            if SOURCE_REGION == TARGET_REGION:
+                if snapshot['type'] == 'cluster':
+                    client.modify_db_cluster_snapshot_attribute(DBClusterSnapshotIdentifier=snapshot['name'], AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
+                else:
+                    client.modify_db_snapshot_attribute(DBSnapshotIdentifier=snapshot['name'], AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
+                client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                continue
+            else:
+                try:
+                    if snapshot['type'] == 'cluster':
+                        client_target.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=target_snapshot)
+                        client_target.modify_db_cluster_snapshot_attribute(DBClusterSnapshotIdentifier=target_snapshot, AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
+                        client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                        client_target.add_tags_to_resource(ResourceName=target_region_cluster_snapshot_arn, Tags=TAGS_SHARED)
+                    else:
+                        client_target.describe_db_snapshots(DBSnapshotIdentifier=target_snapshot)
+                        client_target.modify_db_snapshot_attribute(DBSnapshotIdentifier=target_snapshot, AttributeName='restore', ValuesToAdd=[TARGET_ACCOUNT])
+                        client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                        client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_SHARED)
+                    continue
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'DBSnapshotNotFound' or e.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
+                        logger.info("Snapshot does not exist in the target region: %s (%s)", target_snapshot, e.response['Error']['Code'])
+                        try:
+                            if snapshot['type'] == 'cluster':
+                                client_target.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['arn'], TargetDBClusterSnapshotIdentifier=target_snapshot, Tags=TAGS_CREATED_BY)
+                            else:
+                                client_target.copy_db_snapshot(SourceDBSnapshotIdentifier=snapshot['arn'], TargetDBSnapshotIdentifier=target_snapshot, Tags=TAGS_CREATED_BY)    
+                            client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_COPIED)
+                            continue
+                        except ClientError as ein:
+                            if ein.response['Error']['Code'] == 'DBSnapshotAlreadyExistsFault' or ein.response['Error']['Code'] == 'DBClusterSnapshotAlreadyExistsFault':
+                                logger.error("Skipping share no key: %s (%s)", target_snapshot, ein.response['Error']['Code'])
+                                continue
+                            else:
+                                logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
+                                raise ein
+                    else:
+                        logger.error("Error checking snapshot: %s (%s)", target_snapshot, e.response['Error']['Code'])
+                        raise e
                 continue
 
         if snapshot['action'] == 'delete':
@@ -166,20 +247,22 @@ def process_snapshots(snapshots, databases, client, client_target):
                         client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot['name'])
                         try:
                             client_target.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=target_snapshot)
-                        except ClientError as e:
-                            if e.response['Error']['Code'] == 'DBSnapshotNotFound':
-                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot)
+                        except ClientError as e1:
+                            if e1.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
+                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e1.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s", target_snapshot)           
+                                logger.error("Error checking snapshot: %s", target_snapshot, e1.response['Error']['Code'])
+                                raise e1         
                     else:
                         client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
                         try:    
                             client_target.delete_db_snapshot(DBSnapshotIdentifier=target_snapshot)
-                        except:
-                            if e.response['Error']['Code'] == 'DBSnapshotNotFound':
-                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot)
+                        except ClientError as e2:
+                            if e2.response['Error']['Code'] == 'DBSnapshotNotFound':
+                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e2.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s", target_snapshot)    
+                                logger.error("Error checking snapshot: %s", target_snapshot, e2.response['Error']['Code'])
+                                raise e2   
                     continue
             snapshot['action'] = 'unshare'
             logger.info("Did not delete snapshot %s as it wasn't created by DBSSR!", snapshot['name'])
@@ -188,6 +271,7 @@ def process_snapshots(snapshots, databases, client, client_target):
             logger.info("Unsharing snapshot %s", snapshot['name'])
             target_snapshot=snapshot['name'] + '-DBSSR'
             target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
             if SOURCE_REGION == TARGET_REGION:
                 if snapshot['type'] == 'cluster':
                     client.modify_db_cluster_snapshot_attribute(DBClusterSnapshotIdentifier=snapshot['name'], AttributeName='restore', ValuesToRemove=[TARGET_ACCOUNT])
@@ -198,10 +282,12 @@ def process_snapshots(snapshots, databases, client, client_target):
             else:
                 if snapshot['type'] == 'cluster':
                     client_target.modify_db_cluster_snapshot_attribute(DBClusterSnapshotIdentifier=target_snapshot, AttributeName='restore', ValuesToRemove=[TARGET_ACCOUNT])
+                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                    client_target.add_tags_to_resource(ResourceName=target_region_cluster_snapshot_arn, Tags=TAGS_SHARED)
                 else:
                     client_target.modify_db_snapshot_attribute(DBSnapshotIdentifier=target_snapshot, AttributeName='restore', ValuesToRemove=[TARGET_ACCOUNT])
-                client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
-                client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_SHARED)
+                    client.add_tags_to_resource(ResourceName=snapshot['arn'], Tags=TAGS_SHARED)
+                    client_target.add_tags_to_resource(ResourceName=target_region_snapshot_arn, Tags=TAGS_SHARED)
                 continue
 
 def filter_databases(pattern, response):
@@ -350,15 +436,25 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         
         if results[snapshot[identifier]]['SnapshotType'] == 'manual':
             if results[snapshot[identifier]]['action'] == 'tbd':
-                if results[snapshot[identifier]]['KmsKeyId'] != SOURCE_KMS_KEY:
-                    if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'copied_kms'):
-                        results[snapshot[identifier]]['action'] = 'delete'
+                try:
+                    if results[snapshot[identifier]]['KmsKeyId'] != SOURCE_KMS_KEY:
+                        if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'copied_kms'):
+                            results[snapshot[identifier]]['action'] = 'delete'
+                        else:
+                            results[snapshot[identifier]]['action'] = 'copy_kms'
+                        if debugger: logger.info('Entered J1')
+                    else:    
+                        results[snapshot[identifier]]['action'] = 'share'
+                        if debugger: logger.info('Entered J2')
+                except KeyError as e:
+                    if str(e) == "'KmsKeyId'":
+                        if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'copied'):
+                            results[snapshot[identifier]]['action'] = 'share_no_key'
+                        else:
+                            results[snapshot[identifier]]['action'] = 'copy_no_key'
+                        if debugger: logger.info('Entered J3')
                     else:
-                        results[snapshot[identifier]]['action'] = 'copy_kms'
-                    if debugger: logger.info('Entered J1')
-                else:    
-                    results[snapshot[identifier]]['action'] = 'share'
-                    if debugger: logger.info('Entered J2')
+                        raise e
             if debugger: logger.info('Entered J')
             continue
 
