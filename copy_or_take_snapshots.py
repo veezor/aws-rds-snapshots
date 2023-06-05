@@ -19,7 +19,7 @@ TARGET_ACCOUNT = os.getenv('AWS_TARGET_ACCOUNT', '000000000000').strip()
 DEBUG_DATABASE = os.getenv('DEBUG_DATABASE', '').strip()
 SOURCE_KMS_KEY = f"arn:aws:kms:{SOURCE_REGION}:{SOURCE_ACCOUNT}:key/{KMS_KEY}"
 TARGET_KMS_KEY = f"arn:aws:kms:{TARGET_REGION}:{SOURCE_ACCOUNT}:key/{KMS_KEY}"
-
+SNAPSHOT_OLD_IN_DAYS = int(os.getenv('SNAPSHOT_OLD_IN_DAYS', '30'))
 
 logger = logging.getLogger()
 logger.setLevel(LOGLEVEL.upper())
@@ -59,6 +59,7 @@ def lambda_handler(event, context):
     
     process_snapshots(available_snapshots, database_names, client, client_target)
     create_snapshots(database_names, client)
+    delete_old_snapshots(available_snapshots, client, client_target)
 
     then = datetime.now()    
     logger.info("Finished in %ss", (then - now).seconds)
@@ -493,3 +494,11 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
 
         if debugger: logger.info('Entered Q')
     return results
+
+def delete_old_snapshots(snapshots, client, client_target):
+    for snapshot in snapshots.values():
+        snapshot_time = snapshot['SnapshotCreateTime']
+        age = datetime.now() - snapshot_time
+        if age > timedelta(days=SNAPSHOT_OLD_IN_DAYS):
+            print('Deleting snapshot:', snapshot['DBSnapshotIdentifier'])
+            client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['DBSnapshotIdentifier'])
