@@ -59,7 +59,7 @@ def lambda_handler(event, context):
     
     process_snapshots(available_snapshots, database_names, client, client_target)
     create_snapshots(database_names, client)
-    delete_old_snapshots(available_snapshots, client, client_target)
+    delete_old_snapshots(client, client_target)
 
     then = datetime.now()    
     logger.info("Finished in %ss", (then - now).seconds)
@@ -495,10 +495,21 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         if debugger: logger.info('Entered Q')
     return results
 
-def delete_old_snapshots(snapshots, client, client_target):
-    for snapshot in snapshots.values():
-        snapshot_time = snapshot['SnapshotCreateTime']
-        age = datetime.now() - snapshot_time
-        if age > timedelta(days=SNAPSHOT_OLD_IN_DAYS):
-            print('Deleting snapshot:', snapshot['DBSnapshotIdentifier'])
-            client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['DBSnapshotIdentifier'])
+def delete_old_snapshots():
+    response_client = client.describe_db_snapshots()
+    for snapshot in response_client['DBSnapshots']:
+        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
+            if any(find_tag(snapshot['TagList'], 'DBSSR', 'shared') or find_tag(snapshot['TagList'], 'DBSSR', 'copied')):
+                age = datetime.now() - snapshot['SnapshotCreateTime']
+                if age > timedelta(days=SNAPSHOT_OLD_IN_DAYS):
+                    print('Deleting source old snapshot:', snapshot['DBSnapshotIdentifier'])
+                    client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['DBSnapshotIdentifier'])
+
+    response_client_target = client_target.describe_db_snapshots()
+    for snapshot in response_client_target['DBSnapshots']:
+        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
+            if any(find_tag(snapshot['TagList'], 'DBSSR', 'shared') or find_tag(snapshot['TagList'], 'DBSSR', 'copied')):
+                age = datetime.now() - snapshot['SnapshotCreateTime']
+                if age > timedelta(days=SNAPSHOT_OLD_IN_DAYS):
+                    print('Deleting target old snapshot:', snapshot['DBSnapshotIdentifier'])
+                    client_target.delete_db_snapshot(DBSnapshotIdentifier=snapshot['DBSnapshotIdentifier'])
