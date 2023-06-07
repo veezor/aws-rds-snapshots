@@ -249,9 +249,9 @@ def process_snapshots(snapshots, databases, client, client_target):
                             client_target.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=target_snapshot)
                         except ClientError as e1:
                             if e1.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
-                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e1.response['Error']['Code'])
+                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot)
                             else:
-                                logger.error("Error checking snapshot: %s", target_snapshot, e1.response['Error']['Code'])
+                                logger.error("Error checking snapshot: %s", target_snapshot)
                                 raise e1         
                     else:
                         client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
@@ -261,7 +261,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                             if e2.response['Error']['Code'] == 'DBSnapshotNotFound':
                                 logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e2.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s", target_snapshot, e2.response['Error']['Code'])
+                                logger.error("Error checking snapshot: %s", target_snapshot)
                                 raise e2   
                     continue
             snapshot['action'] = 'unshare'
