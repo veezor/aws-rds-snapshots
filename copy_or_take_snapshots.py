@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, timedelta, tzinfo, timezone
 from re import I
 from utils import *
 import yaml
@@ -59,7 +59,20 @@ def lambda_handler(event, context):
     
     process_snapshots(available_snapshots, database_names, client, client_target)
     create_snapshots(database_names, client)
-    delete_old_snapshots(client, client_target)
+    
+    logger.info("Cleaning up old snapshots on source account")
+    filtered_source_old_snapshots = filter_old_snapshots(client)
+    filtered_source_old_cluster_snapshots = filter_old_cluster_snapshots(client)
+    source_old_snapshots = { **filtered_source_old_snapshots, **filtered_source_old_cluster_snapshots }
+    for snapshot in source_old_snapshots:
+        delete_snapshot(client, snapshot)
+
+    logger.info("Cleaning up old snapshots on target account")
+    filtered_target_old_snapshots = filter_old_snapshots(client_target)
+    filtered_target_old_cluster_snapshots = filter_old_cluster_snapshots(client_target)
+    target_old_snapshots = { **filtered_target_old_snapshots, **filtered_target_old_cluster_snapshots }
+    for snapshot in target_old_snapshots:
+        delete_snapshot(client_target, snapshot)
 
     then = datetime.now()    
     logger.info("Finished in %ss", (then - now).seconds)
@@ -495,21 +508,24 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         if debugger: logger.info('Entered Q')
     return results
 
-def delete_old_snapshots():
+def filter_old_snapshots(client):
     response_client = client.describe_db_snapshots()
+    results = {}
     for snapshot in response_client['DBSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
-            if any(find_tag(snapshot['TagList'], 'DBSSR', 'shared') or find_tag(snapshot['TagList'], 'DBSSR', 'copied')):
-                age = datetime.now() - snapshot['SnapshotCreateTime']
-                if age > timedelta(days=SNAPSHOT_OLD_IN_DAYS):
-                    print('Deleting source old snapshot:', snapshot['DBSnapshotIdentifier'])
-                    client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['DBSnapshotIdentifier'])
+        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+            if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
+                results[snapshot['DBSnapshotIdentifier']] = snapshot
+    return results
 
-    response_client_target = client_target.describe_db_snapshots()
-    for snapshot in response_client_target['DBSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
-            if any(find_tag(snapshot['TagList'], 'DBSSR', 'shared') or find_tag(snapshot['TagList'], 'DBSSR', 'copied')):
-                age = datetime.now() - snapshot['SnapshotCreateTime']
-                if age > timedelta(days=SNAPSHOT_OLD_IN_DAYS):
-                    print('Deleting target old snapshot:', snapshot['DBSnapshotIdentifier'])
-                    client_target.delete_db_snapshot(DBSnapshotIdentifier=snapshot['DBSnapshotIdentifier'])
+def filter_old_cluster_snapshots(client):
+    response_client = client.describe_db_cluster_snapshots()
+    results = {}
+    for snapshot in response_client['DBClusterSnapshots']:
+        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+            if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
+                results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
+    return results
+
+def delete_snapshot(client, snapshot):
+    print('Deleting old snapshot:', snapshot)
+    client.delete_db_snapshot(snapshot)
