@@ -196,7 +196,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
                                 continue
                     else:
-                        logger.error("Error checking snapshot: %s (%s)", target_snapshot, e.response['Error']['Code'])
+                        logger.error("Error checking snapshot to share: %s (%s)", target_snapshot, e.response['Error']['Code'])
                         continue
                 continue
         if snapshot['action'] == 'share_no_key':
@@ -242,7 +242,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
                                 continue
                     else:
-                        logger.error("Error checking snapshot: %s (%s)", target_snapshot, e.response['Error']['Code'])
+                        logger.error("Error checking snapshot to share wo key: %s (%s)", target_snapshot, e.response['Error']['Code'])
                         continue
                 continue
 
@@ -265,7 +265,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                             if e1.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
                                 logger.info("Snapshot does not exist in the target account: %s (%s)", target_snapshot, e1.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s (%s)", target_snapshot, e1.response['Error']['Code'])
+                                logger.error("Error checking cluster snapshot to delete: %s (%s)", target_snapshot, e1.response['Error']['Code'])
                                 continue        
                     else:
                         client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
@@ -275,7 +275,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                             if e2.response['Error']['Code'] == 'DBSnapshotNotFound':
                                 logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e2.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s, %s", target_snapshot, e2.response['Error']['Code'])
+                                logger.error("Error checking snapshot to delete: %s, %s", target_snapshot, e2.response['Error']['Code'])
                                 continue  
                     continue
             snapshot['action'] = 'unshare'
