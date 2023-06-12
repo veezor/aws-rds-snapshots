@@ -263,9 +263,9 @@ def process_snapshots(snapshots, databases, client, client_target):
                             client_target.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=target_snapshot)
                         except ClientError as e1:
                             if e1.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
-                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot)
+                                logger.info("Snapshot does not exist in the target account: %s (%s)", target_snapshot, e1.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s", target_snapshot)
+                                logger.error("Error checking snapshot: %s (%s)", target_snapshot, e1.response['Error']['Code'])
                                 continue        
                     else:
                         client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
