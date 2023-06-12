@@ -18,6 +18,7 @@ provider:
       # uncomment and type the RDS identifier to debug
       #DEBUG_DATABASE: rds_id
       TZ: ${self:custom.awsTimeZone}
+      SNAPSHOT_OLD_IN_DAYS: ${self:custom.backupRetention}
 
 # you can add statements to the Lambda function's IAM Role here
 resources:
@@ -179,6 +180,8 @@ custom:
     target: 111111111111
   # Replace these values with UTC Time Zone
   awsTimeZone: Etc/GMT
+  # Define snapshot retention time in days
+  backupRetention: 30
 
 plugins:
   - serverless-python-requirements
