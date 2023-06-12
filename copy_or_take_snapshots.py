@@ -60,14 +60,14 @@ def lambda_handler(event, context):
     process_snapshots(available_snapshots, database_names, client, client_target)
     create_snapshots(database_names, client)
     
-    logger.info("Cleaning up old snapshots on source account")
+    logger.info("Cleaning up old snapshots on source region: %s", SOURCE_REGION)
     filtered_source_old_snapshots = filter_old_snapshots(client)
     filtered_source_old_cluster_snapshots = filter_old_cluster_snapshots(client)
     source_old_snapshots = { **filtered_source_old_snapshots, **filtered_source_old_cluster_snapshots }
     for snapshot in source_old_snapshots:
         delete_snapshot(client, snapshot)
 
-    logger.info("Cleaning up old snapshots on target account")
+    logger.info("Cleaning up old snapshots on target region: %s", SOURCE_REGION)
     filtered_target_old_snapshots = filter_old_snapshots(client_target)
     filtered_target_old_cluster_snapshots = filter_old_cluster_snapshots(client_target)
     target_old_snapshots = { **filtered_target_old_snapshots, **filtered_target_old_cluster_snapshots }
@@ -194,10 +194,10 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 continue
                             else:
                                 logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
-                                raise ein
+                                continue
                     else:
                         logger.error("Error checking snapshot: %s (%s)", target_snapshot, e.response['Error']['Code'])
-                        raise e
+                        continue
                 continue
         if snapshot['action'] == 'share_no_key':
             logger.info("Sharing snapshot %s with out kms key", snapshot['name'])
@@ -240,10 +240,10 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 continue
                             else:
                                 logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
-                                raise ein
+                                continue
                     else:
                         logger.error("Error checking snapshot: %s (%s)", target_snapshot, e.response['Error']['Code'])
-                        raise e
+                        continue
                 continue
 
         if snapshot['action'] == 'delete':
@@ -266,17 +266,17 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 logger.info("Snapshot does not exist in the target account: %s", target_snapshot)
                             else:
                                 logger.error("Error checking snapshot: %s", target_snapshot)
-                                raise e1         
+                                continue        
                     else:
                         client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
                         try:    
                             client_target.delete_db_snapshot(DBSnapshotIdentifier=target_snapshot)
                         except ClientError as e2:
-                            if e2.response['Error']['Code'] == 'DBSnapshotNotFound':
+                            if e2.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
                                 logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e2.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot: %s", target_snapshot)
-                                raise e2   
+                                logger.error("Error checking snapshot: %s, %s", target_snapshot, e2.response['Error']['Code'])
+                                continue  
                     continue
             snapshot['action'] = 'unshare'
             logger.info("Did not delete snapshot %s as it wasn't created by DBSSR!", snapshot['name'])
@@ -468,7 +468,8 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
                             results[snapshot[identifier]]['action'] = 'copy_no_key'
                         if debugger: logger.info('Entered J3')
                     else:
-                        raise e
+                        logger.error("Error setting snapshot type: %s, %s", e.response['Error']['Code'])
+                        continue
             if debugger: logger.info('Entered J')
             continue
 
@@ -512,7 +513,8 @@ def filter_old_snapshots(client):
     response_client = client.describe_db_snapshots()
     results = {}
     for snapshot in response_client['DBSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
+        # NEED TO FIX TAGGING SOURCE REGION SNAPSHOTS if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
                 results[snapshot['DBSnapshotIdentifier']] = snapshot
     return results
@@ -521,11 +523,24 @@ def filter_old_cluster_snapshots(client):
     response_client = client.describe_db_cluster_snapshots()
     results = {}
     for snapshot in response_client['DBClusterSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
+        # NEED TO FIX TAGGING SOURCE REGION SNAPSHOTS if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
                 results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
     return results
 
 def delete_snapshot(client, snapshot):
-    print('Deleting old snapshot:', snapshot)
-    client.delete_db_snapshot(snapshot)
+    logger.info('Deleting old snapshot: %s', snapshot)
+    try:
+        client.delete_db_snapshot(DBSnapshotIdentifier=snapshot)
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'DBSnapshotNotFound':
+            try:
+                client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot)
+            except ClientError as ein:
+                if ein.response['Error']['Code'] == 'DBClusterSnapshotNotFound':
+                    logger.info("Snapshot does not exist: %s (%s)", snapshot, ein.response['Error']['Code'])
+                else:
+                    logger.info("Snapshot state not valid: %s (%s)", snapshot, ein.response['Error']['Code'])
+        else:
+            logger.info("Snapshot state not valid: %s (%s)", snapshot, e.response['Error']['Code'])
