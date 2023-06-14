@@ -102,8 +102,8 @@ def process_snapshots(snapshots, databases, client, client_target):
         if snapshot['action'] == 'copy':
             logger.info("Copying snapshot %s", snapshot['name'])
             target_snapshot=snapshot['name'].split(':')[1] + '-DBSSR'
-            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
-            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
+            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name'].split(':')[1]}-dbssr"
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name'].split(':')[1]}-dbssr"
             if SOURCE_REGION == TARGET_REGION:
                 if snapshot['type'] == 'cluster':
                     client.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['name'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=SOURCE_KMS_KEY, Tags=TAGS_CREATED_BY)
@@ -181,7 +181,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                     continue
                 except ClientError as e:
                     if e.response['Error']['Code'] == 'DBSnapshotNotFound' or e.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
-                        logger.info("Snapshot does not exist in the target region: %s", target_snapshot)
+                        logger.info("Snapshot does not exist in the target region: %s (%s)", target_snapshot, e.response['Error']['Code'])
                         try:
                             if snapshot['type'] == 'cluster':
                                 client_target.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['arn'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=TARGET_KMS_KEY, Tags=TAGS_CREATED_BY)
@@ -263,7 +263,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                             client_target.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=target_snapshot)
                         except ClientError as e1:
                             if e1.response['Error']['Code'] == 'DBClusterSnapshotNotFoundFault':
-                                logger.info("Snapshot does not exist in the target account: %s (%s)", target_snapshot, e1.response['Error']['Code'])
+                                logger.info("Cluster snapshot does not exist in the target region: %s (%s)", target_snapshot, e1.response['Error']['Code'])
                             else:
                                 logger.error("Error checking cluster snapshot to delete: %s (%s)", target_snapshot, e1.response['Error']['Code'])
                                 continue        
@@ -273,9 +273,9 @@ def process_snapshots(snapshots, databases, client, client_target):
                             client_target.delete_db_snapshot(DBSnapshotIdentifier=target_snapshot)
                         except ClientError as e2:
                             if e2.response['Error']['Code'] == 'DBSnapshotNotFound':
-                                logger.info("Snapshot does not exist in the target account: %s", target_snapshot, e2.response['Error']['Code'])
+                                logger.info("Snapshot does not exist in the target region: %s (%s)", target_snapshot, e2.response['Error']['Code'])
                             else:
-                                logger.error("Error checking snapshot to delete: %s, %s", target_snapshot, e2.response['Error']['Code'])
+                                logger.error("Error checking snapshot to delete: %s (%s)", target_snapshot, e2.response['Error']['Code'])
                                 continue  
                     continue
             snapshot['action'] = 'unshare'
@@ -513,8 +513,6 @@ def filter_old_snapshots(client, snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBSnapshots']:
-        # if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
-        # NEED TO FIX TAGGING SOURCE REGION SNAPSHOTS
         if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
                 results[snapshot['DBSnapshotIdentifier']] = snapshot
@@ -524,8 +522,6 @@ def filter_old_cluster_snapshots(client, snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBClusterSnapshots']:
-        # if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
-        # NEED TO FIX TAGGING SOURCE REGION SNAPSHOTS 
         if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
                 results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
