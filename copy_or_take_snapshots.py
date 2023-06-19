@@ -193,7 +193,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 logger.error("Skipping share: %s (%s)", target_snapshot, ein.response['Error']['Code'])
                                 continue
                             else:
-                                logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
+                                logger.error("Error trying to copy snapshot to share: %s (%s)", target_snapshot, ein.response['Error']['Code'])
                                 continue
                     else:
                         logger.error("Error checking snapshot to share: %s (%s)", target_snapshot, e.response['Error']['Code'])
@@ -239,7 +239,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 logger.error("Skipping share no key: %s (%s)", target_snapshot, ein.response['Error']['Code'])
                                 continue
                             else:
-                                logger.error("Error: %s (%s)", target_snapshot, ein.response['Error']['Code'])
+                                logger.error("Error trying to copy snapshot to share wo key: %s (%s)", target_snapshot, ein.response['Error']['Code'])
                                 continue
                     else:
                         logger.error("Error checking snapshot to share wo key: %s (%s)", target_snapshot, e.response['Error']['Code'])
