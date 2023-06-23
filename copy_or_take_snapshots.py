@@ -480,7 +480,7 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
             continue
 
         if snapshot['SnapshotType'] == 'manual' and results[snapshot[identifier]]['SnapshotType'] == 'manual':
-            snapshot['action'] == 'share'
+            snapshot['action'] = 'share'
             if snapshot['SnapshotCreateTime'].replace(tzinfo=None) >= results[snapshot[identifier]]['SnapshotCreateTime'].replace(tzinfo=None):
                 results[snapshot[identifier]] = snapshot
             if debugger: logger.info('Entered L')
