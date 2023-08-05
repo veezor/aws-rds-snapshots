@@ -1,24 +1,26 @@
 service: aws-rds-snapshots
-frameworkVersion: '2'
-
+frameworkVersion: '3'
+# To deploy use sls deploy --stage (source ou target) --region (set aws region)
 provider:
   name: aws
   runtime: python3.8
-  lambdaHashingVersion: 20201221
-  region: us-east-1 # you can overwrite defaults here
+  stage: ${opt:stage}
+  region: ${opt:region, 'us-east-1'} # you can overwrite defaults here
   environment:
-      DATABASE_NAME_PATTERN: TAG
-      BACKUP_INTERVAL: ${self:custom.backupInterval}
-      SOURCE_AWS_REGION: ${self:custom.sourceAwsRegion}
-      TARGET_AWS_REGION: ${self:custom.targetAwsRegion}
-      AWS_TARGET_KMS_KEY: ${self:custom.awsTargetKmsKey}
-      AWS_SOURCE_ACCOUNT: ${self:custom.awsTargetAccount.source}
-      AWS_TARGET_ACCOUNT: ${self:custom.awsTargetAccount.target}
-      LOG_LEVEL: info
-      # uncomment and type the RDS identifier to debug
-      #DEBUG_DATABASE: rds_id
-      TZ: ${self:custom.awsTimeZone}
-      SNAPSHOT_OLD_IN_DAYS: ${self:custom.backupRetention}
+    DATABASE_NAME_PATTERN: TAG
+    BACKUP_INTERVAL: ${self:custom.backupInterval}
+    SOURCE_AWS_REGION: ${self:custom.sourceAwsRegion}
+    TARGET_AWS_REGION: ${self:custom.targetAwsRegion}
+    AWS_TARGET_KMS_KEY: ${self:custom.awsTargetKmsKey}
+    AWS_SOURCE_ACCOUNT: ${self:custom.awsTargetAccount.source}
+    AWS_TARGET_ACCOUNT: ${self:custom.awsTargetAccount.target}
+    LOG_LEVEL: info
+    # uncomment and type the RDS identifier to debug
+    #DEBUG_DATABASE: fitness-classes-production-cluster
+    TZ: ${self:custom.awsTimeZone}
+    SNAPSHOT_OLD_IN_DAYS: ${self:custom.backupRetention}
+    INGNORE_SNAPSHOTS_TAG: ${self:custom.ignoreTag}
+    PURGE_SOURCE_SNAPSHOTS: ${self:custom.purgeSourceSnaps}
 
 # you can add statements to the Lambda function's IAM Role here
 resources:
@@ -143,8 +145,6 @@ resources:
 # generate lambda for source account, (stage == source) 
 functions:
   lambda_handler_source:
-    stages:
-      - source
     role: sourceRole
     handler: copy_or_take_snapshots.lambda_handler
     timeout: 60
@@ -153,8 +153,6 @@ functions:
 
 # generate lambda for target account, (stage == target)
 lambda_handler_target:
-    stages:
-      - target
     role: targetRole
     handler: restore_snapshots.lambda_handler
     timeout: 60
@@ -165,6 +163,17 @@ custom:
   pythonRequirements:
     useDownloadCache: false
     slim: true
+  # Define wich git information will be exported to ENVs or TAGs in the functions
+  gitVariablesEnvWhitelist: []
+  gitVariablesTagsWhitelist: ['GIT_REPOSITORY', 'GIT_BRANCH']
+  # Define wich functions must be deployed based on stage passes to deploy as --stage (source or target).
+  serverlessIfElse:
+    - If: '"${self:provider.stage}" == "source"'
+      Exclude:
+        - functions.lambda_handler_target
+    - If: '"${self:provider.stage}" == "target"'
+      Exclude:
+        - functions.lambda_handler_source
   # Replace with the interval in hours
   backupInterval: 6
   # Replace value with the source region
@@ -182,7 +191,14 @@ custom:
   awsTimeZone: Etc/GMT
   # Define snapshot retention time in days
   backupRetention: 30
+  # Define manual snapshots with specific tag to ignore
+  ignoreTag: None
+  # Set to true to delete/purge source region snapshots after shared to the target region (works when source and target regions are different) otherwise set to false
+  purgeSourceSnap: true
+
 
 plugins:
   - serverless-python-requirements
   - serverless-plugin-select
+  - serverless-plugin-git-variables
+  - serverless-plugin-ifelse
