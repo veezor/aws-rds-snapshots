@@ -3,13 +3,10 @@
   "description": "",
   "version": "0.1.0",
   "devDependencies": {
-    "serverless-plugin-git-variables": "^5.2.0",
     "serverless-plugin-select": "^2.0.0-rc.1",
-    "serverless-python-requirements": "^6.0.0"
+    "serverless-python-requirements": "^5.1.1"
   },
   "dependencies": {
-    "boto3": "^0.0.1",
-    "serverless": "^3.33.0",
-    "serverless-plugin-ifelse": "^1.0.7"
+    "boto3": "^0.0.1"
   }
 }

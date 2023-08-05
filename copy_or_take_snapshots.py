@@ -5,6 +5,8 @@ from utils import *
 import yaml
 from botocore.exceptions import ClientError
 
+
+
 LOGLEVEL = os.getenv('LOG_LEVEL', 'ERROR').strip()
 SOURCE_REGION = os.getenv('SOURCE_AWS_REGION', os.getenv('AWS_DEFAULT_REGION', 'us-east-1')).strip()
 TARGET_REGION = os.getenv('TARGET_AWS_REGION', os.getenv('AWS_DEFAULT_REGION', 'us-east-1')).strip()
@@ -18,8 +20,6 @@ DEBUG_DATABASE = os.getenv('DEBUG_DATABASE', '').strip()
 SOURCE_KMS_KEY = f"arn:aws:kms:{SOURCE_REGION}:{SOURCE_ACCOUNT}:key/{KMS_KEY}"
 TARGET_KMS_KEY = f"arn:aws:kms:{TARGET_REGION}:{SOURCE_ACCOUNT}:key/{KMS_KEY}"
 SNAPSHOT_OLD_IN_DAYS = int(os.getenv('SNAPSHOT_OLD_IN_DAYS', '30'))
-INGNORE_SNAPSHOTS_TAG = os.getenv('INGNORE_SNAPSHOTS_TAG').strip()
-PURGE_SOURCE_SNAPSHOTS = os.getenv('PURGE_SOURCE_SNAPSHOTS').strip()
 
 logger = logging.getLogger()
 logger.setLevel(LOGLEVEL.upper())
@@ -61,30 +61,20 @@ def lambda_handler(event, context):
     create_snapshots(database_names, client)
     
     logger.info("Cleaning up old snapshots on source region: %s", SOURCE_REGION)
-    filtered_source_old_snapshots = filter_old_snapshots(instance_snapshots)
-    filtered_source_old_cluster_snapshots = filter_old_cluster_snapshots(cluster_snapshots)
-    if SOURCE_REGION != TARGET_REGION:
-        if PURGE_SOURCE_SNAPSHOTS == 'true':
-            filtered_source_purgeable_snapshots = filter_source_purgeable_snapshots(instance_snapshots)
-            filtered_source_purgeable_cluster_snapshots = filter_source_purgeable_cluster_snapshots(cluster_snapshots)
-            source_old_snapshots = { **filtered_source_old_snapshots, **filtered_source_old_cluster_snapshots, **filtered_source_purgeable_snapshots, **filtered_source_purgeable_cluster_snapshots }
-    else: 
-        source_old_snapshots = { **filtered_source_old_snapshots, **filtered_source_old_cluster_snapshots }
-    logger.info("To delete %i snapshots in source region", len(source_old_snapshots))
+    filtered_source_old_snapshots = filter_old_snapshots(client, instance_snapshots)
+    filtered_source_old_cluster_snapshots = filter_old_cluster_snapshots(client, cluster_snapshots)
+    source_old_snapshots = { **filtered_source_old_snapshots, **filtered_source_old_cluster_snapshots }
     for snapshot in source_old_snapshots:
         delete_snapshot(client, snapshot)
 
     logger.info("Cleaning up old snapshots on target region: %s", TARGET_REGION)
-    instance_target_snapshots = paginate_api_call(client_target, 'describe_db_snapshots', 'DBSnapshots', IncludeShared=False)
-    cluster_target_snapshots = paginate_api_call(client_target, 'describe_db_cluster_snapshots', 'DBClusterSnapshots', IncludeShared=False)
-    filtered_target_old_snapshots = filter_old_snapshots(instance_target_snapshots)
-    filtered_target_old_cluster_snapshots = filter_old_cluster_snapshots(cluster_target_snapshots)
+    filtered_target_old_snapshots = filter_old_snapshots(client_target, instance_snapshots)
+    filtered_target_old_cluster_snapshots = filter_old_cluster_snapshots(client_target, cluster_snapshots)
     target_old_snapshots = { **filtered_target_old_snapshots, **filtered_target_old_cluster_snapshots }
-    logger.info("To delete %i snapshots in target region", len(target_old_snapshots))
     for snapshot in target_old_snapshots:
         delete_snapshot(client_target, snapshot)
 
-    then = datetime.now()
+    then = datetime.now()    
     logger.info("Finished in %ss", (then - now).seconds)
 
 def create_snapshots(databases, client):
@@ -288,7 +278,7 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 logger.error("Error checking snapshot to delete: %s (%s)", target_snapshot, e2.response['Error']['Code'])
                                 continue  
                     continue
-            # snapshot['action'] = 'unshare'
+            snapshot['action'] = 'unshare'
             logger.info("Did not delete snapshot %s as it wasn't created by DBSSR!", snapshot['name'])
 
         if snapshot['action'] == 'unshare':
@@ -385,10 +375,6 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
 
         # Skip snapshots out of backup interval
         if backup_interval and 'SnapshotCreateTime' in snapshot and snapshot['SnapshotCreateTime'].replace(tzinfo=None) < datetime.utcnow().replace(tzinfo=None) - timedelta(hours=backup_interval):
-            continue
-        
-        # Ignore snapshots with specific TAG
-        if find_tag(snapshot['TagList'], INGNORE_SNAPSHOTS_TAG):
             continue
 
         debugger = False
@@ -523,7 +509,7 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         if debugger: logger.info('Entered Q')
     return results
 
-def filter_old_snapshots(snapshots):
+def filter_old_snapshots(client, snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBSnapshots']:
@@ -532,31 +518,12 @@ def filter_old_snapshots(snapshots):
                 results[snapshot['DBSnapshotIdentifier']] = snapshot
     return results
 
-def filter_old_cluster_snapshots(snapshots):
+def filter_old_cluster_snapshots(client, snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBClusterSnapshots']:
         if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
-                results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
-    return results
-
-def filter_source_purgeable_snapshots(snapshots):
-    response_client = snapshots
-    results = {}
-    for snapshot in response_client['DBSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
-            if snapshot['SnapshotCreateTime'] >= datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS) and snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(hours=BACKUP_INTERVAL):
-                results[snapshot['DBSnapshotIdentifier']] = snapshot
-    
-    return results
-
-def filter_source_purgeable_cluster_snapshots(snapshots):
-    response_client = snapshots
-    results = {}  
-    for snapshot in response_client['DBClusterSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
-            if snapshot['SnapshotCreateTime'] >= datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS) and snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(hours=BACKUP_INTERVAL):
                 results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
     return results
 
