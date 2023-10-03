@@ -5,29 +5,33 @@ import os
 import logging
 import re
 
+CREATED_BY_KEY   = os.getenv('CREATED_BY_KEY', 'CreatedBy').strip()
+CREATED_BY_VALUE = os.getenv('CREATED_BY_VALUE', 'DBSSR').strip()
+
+
 _LOGLEVEL = os.getenv('LOG_LEVEL', 'ERROR').strip()
 _TIMESTAMP_FORMAT = '%Y-%m-%d-%H-%M'
 TAGS_CREATED_BY = [
     {
-        'Key': 'CreatedBy',
-        'Value': 'DBSSR'
+        'Key': CREATED_BY_KEY,
+        'Value': CREATED_BY_VALUE
     }
 ]
 TAGS_COPIED = [
     {
-        'Key': 'DBSSR',
+        'Key': CREATED_BY_VALUE,
         'Value': 'copied'
     }
 ]
 TAGS_COPIED_KMS = [
     {
-        'Key': 'DBSSR',
+        'Key': CREATED_BY_VALUE,
         'Value': 'copied_kms'
     }
 ]
 TAGS_SHARED = [
     {
-        'Key': 'DBSSR',
+        'Key': CREATED_BY_VALUE,
         'Value': 'shared'
     }
 ]

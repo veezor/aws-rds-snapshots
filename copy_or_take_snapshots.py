@@ -21,6 +21,9 @@ SNAPSHOT_OLD_IN_DAYS = int(os.getenv('SNAPSHOT_OLD_IN_DAYS', '30'))
 INGNORE_SNAPSHOTS_TAG = os.getenv('INGNORE_SNAPSHOTS_TAG').strip()
 PURGE_SOURCE_SNAPSHOTS = os.getenv('PURGE_SOURCE_SNAPSHOTS').strip()
 
+CREATED_BY_KEY   = os.getenv('CREATED_BY_KEY', 'CreatedBy').strip()
+CREATED_BY_VALUE = os.getenv('CREATED_BY_VALUE', 'DBSSR').strip()
+
 logger = logging.getLogger()
 logger.setLevel(LOGLEVEL.upper())
 
@@ -93,7 +96,7 @@ def create_snapshots(databases, client):
     for database in databases:
         if databases[database]['snapshots'] == 0:
             logger.info("Creating snapshot for database %s", database)
-            target_snapshot = database + now_str + '-DBSSR'
+            target_snapshot = database + now_str + '-' + CREATED_BY_VALUE
             if databases[database]['type'] == 'cluster':
                 client.create_db_cluster_snapshot(DBClusterIdentifier=database, DBClusterSnapshotIdentifier=target_snapshot, Tags=TAGS_CREATED_BY)
             else:
@@ -111,9 +114,9 @@ def process_snapshots(snapshots, databases, client, client_target):
 
         if snapshot['action'] == 'copy':
             logger.info("Copying snapshot %s", snapshot['name'])
-            target_snapshot=snapshot['name'].split(':')[1] + '-DBSSR'
-            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name'].split(':')[1]}-dbssr"
-            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name'].split(':')[1]}-dbssr"
+            target_snapshot=snapshot['name'].split(':')[1] + '-' + CREATED_BY_VALUE
+            target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name'].split(':')[1]}-" + CREATED_BY_VALUE.lower()
+            target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name'].split(':')[1]}-" + CREATED_BY_VALUE.lower()
             if SOURCE_REGION == TARGET_REGION:
                 if snapshot['type'] == 'cluster':
                     client.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['name'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=SOURCE_KMS_KEY, Tags=TAGS_CREATED_BY)
@@ -138,7 +141,7 @@ def process_snapshots(snapshots, databases, client, client_target):
             logger.info("Copying snapshot %s without kms key", snapshot['name'])
             now = datetime.now()
             now_str = now.strftime("-%Y-%m-%d-%H-%M")
-            target_snapshot = snapshot['id'] + now_str + '-DBSSR'
+            target_snapshot = snapshot['id'] + now_str + '-' + CREATED_BY_VALUE
             target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
             target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
             if SOURCE_REGION != TARGET_REGION:
@@ -156,7 +159,7 @@ def process_snapshots(snapshots, databases, client, client_target):
             logger.info("Copying snapshot %s to change kms key", snapshot['name'])
             now = datetime.now()
             now_str = now.strftime("-%Y-%m-%d-%H-%M")
-            target_snapshot = snapshot['id'] + now_str + '-DBSSR'
+            target_snapshot = snapshot['id'] + now_str + '-' + CREATED_BY_VALUE
             if snapshot['type'] == 'cluster':
                 client.copy_db_cluster_snapshot(SourceDBClusterSnapshotIdentifier=snapshot['name'], TargetDBClusterSnapshotIdentifier=target_snapshot, KmsKeyId=SOURCE_KMS_KEY, Tags=TAGS_CREATED_BY)
             else:
@@ -259,7 +262,7 @@ def process_snapshots(snapshots, databases, client, client_target):
         if snapshot['action'] == 'delete':
             logger.info("Deleting snapshot %s", snapshot['name'])
             target_snapshot=snapshot['name']
-            if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
+            if find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE):
                 if SOURCE_REGION == TARGET_REGION:
                     if snapshot['type'] == 'cluster':
                         client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot['name'])
@@ -289,11 +292,11 @@ def process_snapshots(snapshots, databases, client, client_target):
                                 continue  
                     continue
             # snapshot['action'] = 'unshare'
-            logger.info("Did not delete snapshot %s as it wasn't created by DBSSR!", snapshot['name'])
+            logger.info("Did not delete snapshot %s as it wasn't created by %s!", snapshot['name'], CREATED_BY_VALUE)
 
         if snapshot['action'] == 'unshare':
             logger.info("Unsharing snapshot %s", snapshot['name'])
-            target_snapshot=snapshot['name'] + '-DBSSR'
+            target_snapshot=snapshot['name'] + '-' + CREATED_BY_VALUE
             target_region_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:snapshot:{snapshot['name']}"
             target_region_cluster_snapshot_arn=f"arn:aws:rds:{TARGET_REGION}:{SOURCE_ACCOUNT}:cluster-snapshot:{snapshot['name']}"
             if SOURCE_REGION == TARGET_REGION:
@@ -341,7 +344,7 @@ def filter_databases(pattern, response):
         if 'ReadReplicaSourceDBInstanceIdentifier' in database:
             continue
 
-        if (pattern == 'ALL' or (pattern == 'TAG' and find_tag(database['TagList'], 'DBSSRSource', 'true')) or re.search(pattern, database[identifier])) and database['Engine'] in SUPPORTED_ENGINES:
+        if (pattern == 'ALL' or (pattern == 'TAG' and find_tag(database['TagList'], CREATED_BY_VALUE + 'Source', 'true')) or re.search(pattern, database[identifier])) and database['Engine'] in SUPPORTED_ENGINES:
             results[database[identifier]] = { 'snapshots': 0, 'type': database_type, 'arn': database[arn] }
 
     return results
@@ -426,13 +429,13 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
             if debugger: logger.info('Entered C')
             continue
 
-        if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'shared'):
+        if find_tag(results[snapshot[identifier]]['TagList'], CREATED_BY_VALUE, 'shared'):
             if results[snapshot[identifier]]['action'] == 'tbd':
                 results[snapshot[identifier]]['action'] = 'skip'
             if debugger: logger.info('Entered D')
             continue
 
-        if find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'shared'):
             snapshot['action'] = 'skip'
             results[snapshot[identifier]] = snapshot
             if debugger: logger.info('Entered E')
@@ -466,7 +469,7 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
             if results[snapshot[identifier]]['action'] == 'tbd':
                 try:
                     if results[snapshot[identifier]]['KmsKeyId'] != SOURCE_KMS_KEY:
-                        if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'copied_kms'):
+                        if find_tag(results[snapshot[identifier]]['TagList'], CREATED_BY_VALUE, 'copied_kms'):
                             results[snapshot[identifier]]['action'] = 'delete'
                         else:
                             results[snapshot[identifier]]['action'] = 'copy_kms'
@@ -476,7 +479,7 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
                         if debugger: logger.info('Entered J2')
                 except KeyError as e:
                     if str(e) == "'KmsKeyId'":
-                        if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'copied'):
+                        if find_tag(results[snapshot[identifier]]['TagList'], CREATED_BY_VALUE, 'copied'):
                             results[snapshot[identifier]]['action'] = 'share_no_key'
                         else:
                             results[snapshot[identifier]]['action'] = 'copy_no_key'
@@ -500,13 +503,13 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
             if debugger: logger.info('Entered L')
             continue
 
-        if find_tag(results[snapshot[identifier]]['TagList'], 'DBSSR', 'copied'):
+        if find_tag(results[snapshot[identifier]]['TagList'], CREATED_BY_VALUE, 'copied'):
             if results[snapshot[identifier]]['action'] == 'tbd':
                 results[snapshot[identifier]]['action'] = 'skip'
             if debugger: logger.info('Entered M')
             continue
 
-        if find_tag(snapshot['TagList'], 'DBSSR', 'copied'):
+        if find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'copied'):
             snapshot['action'] = 'skip'
             results[snapshot[identifier]] = snapshot
             if debugger: logger.info('Entered N')
@@ -527,7 +530,7 @@ def filter_old_snapshots(snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE) and find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
                 results[snapshot['DBSnapshotIdentifier']] = snapshot
     return results
@@ -536,7 +539,7 @@ def filter_old_cluster_snapshots(snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBClusterSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE) and find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'shared'):
             if snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS):
                 results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
     return results
@@ -545,7 +548,7 @@ def filter_source_purgeable_snapshots(snapshots):
     response_client = snapshots
     results = {}
     for snapshot in response_client['DBSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE) and find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'shared'):
             if snapshot['SnapshotCreateTime'] >= datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS) and snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(hours=BACKUP_INTERVAL):
                 results[snapshot['DBSnapshotIdentifier']] = snapshot
     
@@ -555,7 +558,7 @@ def filter_source_purgeable_cluster_snapshots(snapshots):
     response_client = snapshots
     results = {}  
     for snapshot in response_client['DBClusterSnapshots']:
-        if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR') and find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE) and find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'shared'):
             if snapshot['SnapshotCreateTime'] >= datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_OLD_IN_DAYS) and snapshot['SnapshotCreateTime'] < datetime.now(timezone.utc) - timedelta(hours=BACKUP_INTERVAL):
                 results[snapshot['DBClusterSnapshotIdentifier']] = snapshot
     return results

@@ -13,6 +13,9 @@ SOURCE_ACCOUNT = os.getenv('AWS_SOURCE_ACCOUNT', '000000000000').strip()
 DEBUG_DATABASE = os.getenv('DEBUG_DATABASE', '').strip()
 TARGET_KMS_KEY = f"arn:aws:kms:{TARGET_REGION}:{SOURCE_ACCOUNT}:key/{os.getenv('AWS_TARGET_KMS_KEY', 'None').strip()}"
 
+CREATED_BY_KEY   = os.getenv('CREATED_BY_KEY', 'CreatedBy').strip()
+CREATED_BY_VALUE = os.getenv('CREATED_BY_VALUE', 'DBSSR').strip()
+
 logger = logging.getLogger()
 logger.setLevel(LOGLEVEL.upper())
 
@@ -80,7 +83,7 @@ def define_actions(snapshots, databases):
             if debugger: logger.info('Entrou B')
             continue
 
-        if snapshot['SnapshotType'] == 'manual' and not find_tag(snapshot['TagList'], 'DBSSR', 'shared'):
+        if snapshot['SnapshotType'] == 'manual' and not find_tag(snapshot['TagList'], CREATED_BY_VALUE, 'shared'):
             if snapshot['Status'] == 'creating':
                 snapshot['action'] = 'skip'
                 continue
@@ -94,7 +97,7 @@ def define_actions(snapshots, databases):
             continue
 
         if database['status'] == 'available':
-            if database['identifier'].endswith('-dbssr'):
+            if database['identifier'].endswith('-' + CREATED_BY_VALUE.lower()):
                 snapshot['action'] = 'restore'
                 if debugger: logger.info('Entrou D')
                 continue
@@ -150,7 +153,7 @@ def process_snapshots(snapshots, databases, client):
         database = databases[snapshot['id']]
         if snapshot['action'] == 'rename':
             logger.info("Renaming current database %s", database['identifier'])
-            new_database_identifier = database['identifier'] + '-dbssr'
+            new_database_identifier = database['identifier'] + '-' + CREATED_BY_VALUE.lower()
             if snapshot['type'] == 'cluster':
                 client.modify_db_cluster(DBClusterIdentifier=database['identifier'], NewDBClusterIdentifier=new_database_identifier, ApplyImmediately=True)
             else:
@@ -168,10 +171,10 @@ def process_snapshots(snapshots, databases, client):
 
         if snapshot['action'] == 'restore_cluster_instance':
             logger.info("Provisioning cluster's instance %s", database['identifier'].replace('-cluster',''))
-            instance_class = get_tag(database['tags'], 'DBSSRInstanceClass')
+            instance_class = get_tag(database['tags'], CREATED_BY_VALUE + 'InstanceClass')
             tags = [
                 {
-                    'Key': 'DBSSR',
+                    'Key': CREATED_BY_VALUE,
                     'Value': snapshot['id']
                 }
             ]
@@ -182,30 +185,30 @@ def process_snapshots(snapshots, databases, client):
             logger.info("Restoring snapshot %s as %s", snapshot['name'], database['identifier'])
             tags = [
                 {
-                    'Key': 'DBSSR',
+                    'Key': CREATED_BY_VALUE,
                     'Value': snapshot['id']
                 },
                 {
-                    'Key': 'DBSSRCreateTime',
+                    'Key': CREATED_BY_VALUE + 'CreateTime',
                     'Value': datetime.utcnow().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
                 }
             ]
             if snapshot['type'] == 'cluster':
                 if database['mode'] != 'serverless':
-                    tags.append({'Key':'DBSSRInstanceClass','Value':database['class']})
-                client.restore_db_cluster_from_snapshot(SnapshotIdentifier=snapshot['arn'], DBClusterIdentifier=database['identifier'].replace('-dbssr',''), Engine=database['engine'], Tags=tags, DBSubnetGroupName=database['subnet_group'], VpcSecurityGroupIds=database['vpc_security_groups'])
+                    tags.append({'Key': CREATED_BY_VALUE + 'InstanceClass','Value':database['class']})
+                client.restore_db_cluster_from_snapshot(SnapshotIdentifier=snapshot['arn'], DBClusterIdentifier=database['identifier'].replace('-' + CREATED_BY_VALUE.lower(),''), Engine=database['engine'], Tags=tags, DBSubnetGroupName=database['subnet_group'], VpcSecurityGroupIds=database['vpc_security_groups'])
             else:
-                client.restore_db_instance_from_db_snapshot(DBSnapshotIdentifier=snapshot['arn'], DBInstanceIdentifier=database['identifier'].replace('-dbssr',''), Engine=database['engine'], Tags=tags, DBInstanceClass=database['class'], DBSubnetGroupName=database['subnet_group'], VpcSecurityGroupIds=database['vpc_security_groups'])
+                client.restore_db_instance_from_db_snapshot(DBSnapshotIdentifier=snapshot['arn'], DBInstanceIdentifier=database['identifier'].replace('-' + CREATED_BY_VALUE.lower(),''), Engine=database['engine'], Tags=tags, DBInstanceClass=database['class'], DBSubnetGroupName=database['subnet_group'], VpcSecurityGroupIds=database['vpc_security_groups'])
             continue
 
         if snapshot['action'] == 'delete_database':
-            database_name = database['identifier'] + '-dbssr'
+            database_name = database['identifier'] + '-' + CREATED_BY_VALUE.lower()
             logger.info("Deleting old database %s", database_name)
             try:
                 if snapshot['type'] == 'cluster':
                     if database['mode'] != 'serverless':
-                        logger.info("deleting instance %s from cluster %s", database_name.replace('-cluster','').replace('-dbssr',''), database_name)
-                        client.delete_db_instance(DBInstanceIdentifier=database_name.replace('-cluster','').replace('-dbssr',''), SkipFinalSnapshot=True)
+                        logger.info("deleting instance %s from cluster %s", database_name.replace('-cluster','').replace('-' + CREATED_BY_VALUE.lower(),''), database_name)
+                        client.delete_db_instance(DBInstanceIdentifier=database_name.replace('-cluster','').replace('-' + CREATED_BY_VALUE.lower(),''), SkipFinalSnapshot=True)
                         time.sleep(5)
                     client.delete_db_cluster(DBClusterIdentifier=database_name, SkipFinalSnapshot=True)
                 else:
@@ -217,13 +220,13 @@ def process_snapshots(snapshots, databases, client):
 
         if snapshot['action'] == 'delete_snapshot':
             logger.info("Deleting snapshot %s", snapshot['name'])
-            if find_tag(snapshot['TagList'], 'CreatedBy', 'DBSSR'):
+            if find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE):
                 if snapshot['type'] == 'cluster':
                     client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot['name'])
                 else:
                     client.delete_db_snapshot(DBSnapshotIdentifier=snapshot['name'])
             else:
-                logger.info("Did not delete snaptshot %s as it wasn't created by DBSSR!", snapshot['name'])
+                logger.info("Did not delete snaptshot %s as it wasn't created by %s!", snapshot['name'], CREATED_BY_VALUE)
             continue
 
 def filter_databases(pattern, response):
@@ -243,8 +246,8 @@ def filter_databases(pattern, response):
         create_time = 'ClusterCreateTime'
     
     for database in response[databases]:
-        if (pattern == 'ALL' or (pattern == 'TAG' and find_tag(database['TagList'], 'DBSSR')) or re.search(pattern, database[identifier])) and database['Engine'] in SUPPORTED_ENGINES:
-            database_name = get_tag(database['TagList'], 'DBSSR')
+        if (pattern == 'ALL' or (pattern == 'TAG' and find_tag(database['TagList'], CREATED_BY_VALUE)) or re.search(pattern, database[identifier])) and database['Engine'] in SUPPORTED_ENGINES:
+            database_name = get_tag(database['TagList'], CREATED_BY_VALUE)
 
             # Skip stopped databases
             if database[status] == 'stopped':
@@ -267,7 +270,7 @@ def filter_databases(pattern, response):
 
             vpc_security_groups = get_vpc_security_groups(database['VpcSecurityGroups'])
             database_status = database[status]
-            create_time = get_tag(database['TagList'], 'DBSSRCreateTime')
+            create_time = get_tag(database['TagList'], CREATED_BY_VALUE + 'CreateTime')
             if database_type == 'cluster':
                 results[database_name] = { 'snapshots': 0, 'create_time': create_time, 'old': database.get('old', 'none'), 'type': database_type, 'arn': database[arn], 'identifier': database[identifier], 'engine': database['Engine'], 'mode': database['EngineMode'], 'status': database_status, 'tags': database['TagList'], 'subnet_group': database['DBSubnetGroup'], 'vpc_security_groups': vpc_security_groups }
             else:
