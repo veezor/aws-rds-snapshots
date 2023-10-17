@@ -1,4 +1,4 @@
-service: ${self:custom.backupInterval}
+service: ${self:custom.serviceName}
 frameworkVersion: '3'
 # To deploy use sls deploy --stage (source ou target) --region (set aws region)
 provider:
@@ -21,6 +21,8 @@ provider:
     SNAPSHOT_OLD_IN_DAYS: ${self:custom.backupRetention}
     INGNORE_SNAPSHOTS_TAG: ${self:custom.ignoreTag}
     PURGE_SOURCE_SNAPSHOTS: ${self:custom.purgeSourceSnaps}
+    CREATED_BY_KEY: ${self:custom.createdbyKey}
+    CREATED_BY_VALUE: ${self:custom.createdbyValue}
 
 # you can add statements to the Lambda function's IAM Role here
 resources:
@@ -152,12 +154,12 @@ functions:
       - schedule: cron(0/5 * ? * * *)
 
 # generate lambda for target account, (stage == target)
-lambda_handler_target:
-    role: targetRole
-    handler: restore_snapshots.lambda_handler
-    timeout: 60
-    events:
-      - schedule: cron(0/5 * ? * * *)
+  lambda_handler_target:
+      role: targetRole
+      handler: restore_snapshots.lambda_handler
+      timeout: 60
+      events:
+        - schedule: cron(0/5 * ? * * *)
 
 custom:
   pythonRequirements:
@@ -195,8 +197,11 @@ custom:
   ignoreTag: None
   # Set to true to delete/purge source region snapshots after shared to the target region (works when source and target regions are different) otherwise set to false
   purgeSourceSnap: true
+  # Set a name to your service to be used on Cloudformation, lambda, IAM etc
   serviceName: aws-rds-snapshots
-
+  # Set Created by Tag Key and Value. Essentiall to enable two or more services to run in the same AWS source account
+  createdbyKey: CreatedBy
+  createdbyValue: DBSSR
 
 plugins:
   - serverless-python-requirements
