@@ -1,4 +1,4 @@
-service: aws-rds-snapshots
+service: ${self:custom.backupInterval}
 frameworkVersion: '3'
 # To deploy use sls deploy --stage (source ou target) --region (set aws region)
 provider:
@@ -28,7 +28,7 @@ resources:
     sourceRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: AwsRdsSnapshotsSourceRole
+        RoleName: ${self:custom.serviceName}-SourceRole
         AssumeRolePolicyDocument:
           Version: '2012-10-17'
           Statement:
@@ -38,7 +38,7 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: AwsRdsSnapshotsSourcePolicy
+          - PolicyName: ${self:custom.serviceName}-SourcePolicy
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
@@ -70,20 +70,20 @@ resources:
                     "arn:aws:rds:*:*:snapshot:*",
                      "arn:aws:kms:*:*:key/*"
                     ]
-        - PolicyName: AwsRdsSnapshotsSourcePolicyLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: '*'
+          - PolicyName: ${self:custom.serviceName}-SourcePolicyLogs
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
+                  Action:
+                    - "logs:CreateLogGroup"
+                    - "logs:CreateLogStream"
+                    - "logs:PutLogEvents"
+                  Resource: '*'
     targetRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: AwsRdsSnapshotsTargetRole
+        RoleName: ${self:custom.serviceName}-TargetRole
         AssumeRolePolicyDocument:
           Version: '2012-10-17'
           Statement:
@@ -93,45 +93,45 @@ resources:
                   - lambda.amazonaws.com
               Action: sts:AssumeRole
         Policies:
-          - PolicyName: AwsRdsSnapshotsTargetPolicy
-              PolicyDocument:
-                Version: '2012-10-17'
-                Statement:
-                  - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
-                    Action:
-                      - "rds:DescribeDBInstances"
-                      - "rds:DescribeDBClusters"
-                      - "rds:DescribeDBClusterSnapshots"
-                      - "rds:DescribeDBSnapshots"
-                      - "rds:AddTagsToResource"
-                      - "rds:CreateDBInstance"
-                      - "rds:CopyDBClusterSnapshot"
-                      - "rds:CopyDBSnapshot"
-                      - "rds:ModifyDBCluster"
-                      - "rds:ModifyDBInstance"
-                      - "rds:ModifyDBClusterSnapshotAttribute"
-                      - "rds:ModifyDBSnapshotAttribute"
-                      - "rds:DeleteDBClusterSnapshot"
-                      - "rds:DeleteDBSnapshot"
-                      - "rds:RestoreDBClusterFromSnapshot"
-                      - "rds:RestoreDBInstanceFromDBSnapshot"
-                      - "rds:DeleteDBCluster"
-                      - "rds:DeleteDBInstance"
-                      - "kms:CreateGrant"
-                      - "kms:Encrypt"
-                      - "kms:Decrypt"
-                      - "kms:ReEncrypt*"
-                      - "kms:GenerateDataKey*"
-                      - "kms:DescribeKey"
-                    Resource: [
-                      "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:db:*",
-                      "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:cluster:*",
-                      "arn:aws:rds:*:*:cluster-snapshot:*",
-                      "arn:aws:rds:*:*:snapshot:*",
-                      "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:subgrp:*",
-                      "arn:aws:kms:*:*:key/*"
-                      ]
-          - PolicyName: AwsRdsSnapshotsTargetPolicyLogs
+          - PolicyName: ${self:custom.serviceName}-TargetPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
+                  Action:
+                    - "rds:DescribeDBInstances"
+                    - "rds:DescribeDBClusters"
+                    - "rds:DescribeDBClusterSnapshots"
+                    - "rds:DescribeDBSnapshots"
+                    - "rds:AddTagsToResource"
+                    - "rds:CreateDBInstance"
+                    - "rds:CopyDBClusterSnapshot"
+                    - "rds:CopyDBSnapshot"
+                    - "rds:ModifyDBCluster"
+                    - "rds:ModifyDBInstance"
+                    - "rds:ModifyDBClusterSnapshotAttribute"
+                    - "rds:ModifyDBSnapshotAttribute"
+                    - "rds:DeleteDBClusterSnapshot"
+                    - "rds:DeleteDBSnapshot"
+                    - "rds:RestoreDBClusterFromSnapshot"
+                    - "rds:RestoreDBInstanceFromDBSnapshot"
+                    - "rds:DeleteDBCluster"
+                    - "rds:DeleteDBInstance"
+                    - "kms:CreateGrant"
+                    - "kms:Encrypt"
+                    - "kms:Decrypt"
+                    - "kms:ReEncrypt*"
+                    - "kms:GenerateDataKey*"
+                    - "kms:DescribeKey"
+                  Resource: [
+                    "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:db:*",
+                    "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:cluster:*",
+                    "arn:aws:rds:*:*:cluster-snapshot:*",
+                    "arn:aws:rds:*:*:snapshot:*",
+                    "arn:aws:rds:*:${self:custom.awsTargetAccount.target}:subgrp:*",
+                    "arn:aws:kms:*:*:key/*"
+                    ]
+          - PolicyName: ${self:custom.serviceName}-TargetPolicyLogs
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
@@ -195,6 +195,7 @@ custom:
   ignoreTag: None
   # Set to true to delete/purge source region snapshots after shared to the target region (works when source and target regions are different) otherwise set to false
   purgeSourceSnap: true
+  serviceName: aws-rds-snapshots
 
 
 plugins:
