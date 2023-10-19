@@ -315,6 +315,10 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         if backup_interval and 'SnapshotCreateTime' in snapshot and snapshot['SnapshotCreateTime'].replace(tzinfo=None) < datetime.utcnow().replace(tzinfo=None) - timedelta(hours=backup_interval):
             continue
 
+        # Ignore snapshots from others instances of this script
+        if not(find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE)):
+            continue
+
         if snapshot[identifier] not in results:
             results[snapshot[identifier]] = snapshot
             databases[snapshot[identifier]]['snapshots'] += 1
