@@ -394,6 +394,10 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         if find_tag(snapshot['TagList'], INGNORE_SNAPSHOTS_TAG):
             continue
 
+        # Ignore snapshots from others instances of this script
+        if not(find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE)) and snapshot['SnapshotType'] != 'automated':
+            continue
+
         debugger = False
         if snapshot[identifier] == DEBUG_DATABASE:
             debugger = True
