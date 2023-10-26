@@ -178,6 +178,7 @@ def process_snapshots(snapshots, databases, client):
                     'Value': snapshot['id']
                 }
             ]
+            tags.extend(x for x in database['tags'] if x not in tags)
             client.create_db_instance(DBInstanceIdentifier=database['identifier'].replace('-cluster',''), DBClusterIdentifier=database['identifier'], DBInstanceClass=instance_class, Engine=snapshot['Engine'], Tags=tags)
             continue
 
@@ -193,6 +194,7 @@ def process_snapshots(snapshots, databases, client):
                     'Value': datetime.utcnow().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
                 }
             ]
+            tags.extend(x for x in database['tags'] if x not in tags)
             if snapshot['type'] == 'cluster':
                 if database['mode'] != 'serverless':
                     tags.append({'Key': CREATED_BY_VALUE + 'InstanceClass','Value':database['class']})
