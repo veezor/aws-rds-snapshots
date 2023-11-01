@@ -317,8 +317,8 @@ def filter_available_snapshots(pattern, response, databases, backup_interval=Non
         if backup_interval and 'SnapshotCreateTime' in snapshot and snapshot['SnapshotCreateTime'].replace(tzinfo=None) < datetime.utcnow().replace(tzinfo=None) - timedelta(hours=backup_interval):
             continue
 
-        # Ignore snapshots from others instances of this script
-        if not(find_tag(snapshot['TagList'], CREATED_BY_KEY, CREATED_BY_VALUE)):
+        # Ignore shared snapshots from others instances of this script
+        if not(snapshot['name'].find(CREATED_BY_VALUE.lower())):
             continue
 
         if snapshot[identifier] not in results:
